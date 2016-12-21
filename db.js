@@ -32,8 +32,8 @@ module.exports = function onfido (opts) {
   const documentsDB = createDB('onfido-documents')
   documentsDB.once('closing', () => closed = true)
 
-  const reportsDB = createDB('onfido-reports')
-  reportsDB.once('closing', () => closed = true)
+  // const reportsDB = createDB('onfido-reports')
+  // reportsDB.once('closing', () => closed = true)
 
   // const webhooksDB = node._createDB('onfido-webhooks-' + opts.db)
   // webhooksDB.once('closing', () => closed = true)
@@ -112,20 +112,16 @@ module.exports = function onfido (opts) {
           break
         }
         case topics.document: {
-          newState = utils.clone(state)
-          newState.id = changeVal.id
-          newState.status = status.document.created
+          newState = documents.merge(state, change)
           break
         }
         case topics.documentstatus: {
-          newState = utils.clone(state)
-          newState.report = changeVal.report
-          newState.status = changeVal.status
-          newState.result = changeVal.result
+          newState = documents.merge(state, change)
           break
         }
       }
 
+      delete newState.topic
       cb(null, newState)
     }
   })
@@ -135,8 +131,16 @@ module.exports = function onfido (opts) {
     case topics.queuedocument:
       return ee.emit('document:queue', newState)
     case topics.document:
-      return ee.emit('document:create', newState)
-    case topics.documentstatus:
+      ee.emit('document:create', newState)
+      break
+    }
+
+    // just completed
+    const justCompleted = oldState &&
+        oldState.status !== status.document.complete &&
+        newState.status === status.document.complete
+
+    if (justCompleted) {
       if (newState.result === 'clear') {
         return ee.emit('document:verified', newState)
       } else if (newState.result === 'consider') {
@@ -169,25 +173,39 @@ module.exports = function onfido (opts) {
     return results[0]
   })
 
-  function getApplicantsToCreate (opts={}) {
+  function streamApplicantsToCreate (opts={}) {
     if (!('keys' in opts)) opts.keys = false
 
     opts.eq = status.applicant.new
     return indexes.applicants.status.createReadStream(opts)
   }
 
-  function getDocumentsToCreate (opts={}) {
+  function streamDocumentsToCreate (opts={}) {
     if (!('keys' in opts)) opts.keys = false
 
     opts.eq = status.document.new
     return indexes.documents.status.createReadStream(opts)
   }
 
-  function getDocumentsToCheck (opts={}) {
+  function streamDocumentsToCheck (opts={}) {
     if (!('keys' in opts)) opts.keys = false
 
     opts.eq = status.document.checked
     return indexes.documents.status.createReadStream(opts)
+  }
+
+  function streamVerifiedDocuments (opts={}) {
+    if (!('keys' in opts)) opts.keys = false
+
+    opts.eq = 'clear'
+    return indexes.documents.result.createReadStream(opts)
+  }
+
+  function streamFailedDocuments (opts={}) {
+    if (!('keys' in opts)) opts.keys = false
+
+    opts.eq = 'consider'
+    return indexes.documents.result.createReadStream(opts)
   }
 
   function close () {
@@ -196,7 +214,7 @@ module.exports = function onfido (opts) {
     return closePromise = Promise.all([
       applicantsDB.close(),
       documentsDB.close(),
-      reportsDB.close(),
+      // reportsDB.close(),
       // done => webhooksDB.close(done)
     ])
     .finally(() => closed => true)
@@ -223,15 +241,18 @@ module.exports = function onfido (opts) {
   }
 
   return utils.extend(ee, {
-    getApplicantsToCreate,
-    getDocumentsToCreate,
-    getDocumentsToCheck,
+    streamApplicantsToCreate,
+    streamDocumentsToCreate,
+    streamDocumentsToCheck,
+    streamVerifiedDocuments,
+    streamFailedDocuments,
     getApplicant,
     getDocument,
     getPendingDocument,
     storeOnfidoResource,
     updateOnfidoResource,
-    getOnfidoResource
+    getOnfidoResource,
+    close
   })
 }
 

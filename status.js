@@ -1,5 +1,5 @@
 
-exports.webhook = {
+const webhook = {
   'registered': '0',
   'unregistered': '1'
 }
@@ -14,16 +14,41 @@ exports.webhook = {
 //   done: '1'
 // }
 
-exports.applicant = {
+const applicant = {
   new: '0',
   created: '1'
 }
 
-exports.document = {
+const document = {
   new: '0',
   created: '1',
   awaiting_data: '2',
   awaiting_applicant: '3',
   checked: '4',
   complete: '5'
+}
+
+function getDocumentStatus (checkOrReport) {
+  const { status, result } = checkOrReport
+  switch (status) {
+  case 'in_progress': return document.created
+  case 'completed':
+  case 'complete': {
+    if (result) {
+      return document.complete
+    } else {
+      return document.checked
+    }
+  }
+  case 'awaiting_data': return document.awaiting_data
+  case 'awaiting_applicant': return document.awaiting_applicant
+  default: throw new Error('unknown status: ' + status)
+  }
+}
+
+module.exports = {
+  webhook,
+  applicant,
+  document,
+  getDocumentStatus
 }

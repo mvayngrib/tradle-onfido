@@ -7,13 +7,7 @@ const createProcessor = require('./processor')
 const createDB = require('./db')
 const topics = require('./topics')
 const status = require('./status')
-
-const resultStatusMap = {
-  complete: status.document.checked,
-  completed: status.document.checked,
-  awaiting_data: status.document.awaiting_data,
-  awaiting_applicant: status.document.awaiting_applicant
-}
+const getDocumentStatus = status.getDocumentStatus
 
 module.exports = function actions (opts) {
   typeforce({
@@ -100,7 +94,7 @@ module.exports = function actions (opts) {
                 topic: topics.documentstatus,
                 link: doc.link,
                 report: id,
-                status: resultStatusMap[object.status]
+                status: getDocumentStatus(object)
               }
             }
 
@@ -154,6 +148,9 @@ module.exports = function actions (opts) {
     getOnfidoResource: function (id) {
       return db.getOnfidoResource(id)
     },
-    db: db
+    db: db,
+    close: co(function* () {
+      return db.close()
+    })
   }
 }

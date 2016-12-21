@@ -12,6 +12,7 @@ const createRetryStream = require('@tradle/engine/lib/retrystream')
 const { TYPE } = constants
 const topics = require('./topics')
 const status = require('./status')
+const getDocumentStatus = status.getDocumentStatus
 const tradleToOnfidoType = require('./typemap')
 
 module.exports = function processor (opts) {
@@ -32,7 +33,7 @@ module.exports = function processor (opts) {
     //   })
     //   .on('error', err => ee.emit('error', err))
 
-    const source = db.getApplicantsToCreate({ live: true, keys: false })
+    const source = db.streamApplicantsToCreate({ live: true, keys: false })
     pump(
       source,
       through.obj(addPersonalInfo),
@@ -55,7 +56,7 @@ module.exports = function processor (opts) {
     //   })
     //   .on('error', err => ee.emit('error', err))
 
-    const source = db.getDocumentsToCreate({ live: true, keys: false })
+    const source = db.streamDocumentsToCreate({ live: true, keys: false })
     pump(
       source,
       through.obj(addDocument),
@@ -82,7 +83,7 @@ module.exports = function processor (opts) {
       })
       .on('error', err => ee.emit('error', err))
 
-    const source = db.getDocumentsToCheck({ live: true, keys: false })
+    const source = db.streamDocumentsToCheck({ live: true, keys: false })
     pump(
       source,
       checker,
@@ -187,6 +188,8 @@ module.exports = function processor (opts) {
       topic: topics.document,
       link: link,
       id: document.id,
+      status: getDocumentStatus(check),
+      result: check.result,
       check: check.id,
       report: check.reports[0].id
     })
