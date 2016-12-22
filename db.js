@@ -1,3 +1,4 @@
+const path = require('path')
 const { EventEmitter } = require('events')
 const typeforce = require('typeforce')
 const rawIndexer = require('feed-indexer')
@@ -18,7 +19,7 @@ const status = require('./status')
 module.exports = function onfido (opts) {
   typeforce({
     node: typeforce.Object,
-    db: typeforce.String
+    path: typeforce.String
   }, opts)
 
   let closed
@@ -26,16 +27,16 @@ module.exports = function onfido (opts) {
   const node = opts.node
   const keeper = Promise.promisifyAll(node.keeper)
   const changes = node.changes
-  const applicantsDB = createDB('onfido-applicants')
+  const applicantsDB = createDB('applicants')
   applicantsDB.once('closing', () => closed = true)
 
-  const documentsDB = createDB('onfido-documents')
+  const documentsDB = createDB('documents')
   documentsDB.once('closing', () => closed = true)
 
-  // const reportsDB = createDB('onfido-reports')
+  // const reportsDB = createDB('reports')
   // reportsDB.once('closing', () => closed = true)
 
-  // const webhooksDB = node._createDB('onfido-webhooks-' + opts.db)
+  // const webhooksDB = node._createDB('webhooks-' + opts.db)
   // webhooksDB.once('closing', () => closed = true)
 
   node.once('destroying', close)
@@ -241,7 +242,7 @@ module.exports = function onfido (opts) {
   }
 
   function createDB (name) {
-    const db = node._createDB(name + '-' + opts.db)
+    const db = node._createDB(path.join(opts.path, name + '.db'))
     return Promise.promisifyAll(db)
   }
 

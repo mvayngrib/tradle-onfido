@@ -7,7 +7,8 @@ const Promise = require('bluebird')
 const co = Promise.coroutine
 const fs = Promise.promisifyAll(require('fs'))
 const collect = Promise.promisify(require('stream-collector'))
-const tradle = require('@tradle/engine')
+const { utils, constants } = require('@tradle/engine')
+const { TYPE } = constants
 const testHelpers = require('@tradle/engine/test/helpers')
 const changesFeed = require('changes-feed')
 const memdown = require('memdown')
@@ -15,12 +16,14 @@ const parseDataUri = require('parse-data-uri')
 const Onfido = require('@tradle/onfido-api')
 const createOnfidoDB = require('../db')
 const status = require('../status')
+const convert = require('../convert')
 const createOnfido = require('../')
 const fixtures = {
   applicants: require('./fixtures/applicants'),
   checks: require('./fixtures/checks'),
   documents: require('./fixtures/documents'),
-  documentImages: require('./fixtures/document-images')
+  documentImages: require('./fixtures/document-images'),
+  tradle: require('./fixtures/tradle')
 }
 
 // const keeper = Promise.promisifyAll(testHelpers.keeper())
@@ -32,26 +35,33 @@ const DOC_KEY = APPLICANT_NAME + '-doc'
 const putTestData = co(function* (keeper) {
   yield Promise.all([
     keeper.putAsync(APPLICANT_NAME, { name: APPLICANT_NAME }),
-    keeper.putAsync(PERSONAL_INFO_KEY, {
-      firstName: APPLICANT_NAME,
-      lastName: APPLICANT.last_name,
-      emailAddress: APPLICANT.email,
-    }),
-    keeper.putAsync(DOC_KEY, {
-      _t: 'tradle.DrivingLicense',
-      licenseNumber: '1234567890',
-      photos: [{ url: '..some data uri..' }]
-    })
+    keeper.putAsync(PERSONAL_INFO_KEY, fixtures.tradle['tradle.PersonalInfo']),
+    keeper.putAsync(DOC_KEY, fixtures.tradle['tradle.DrivingLicense'])
   ])
 })
 
-// const Onfido = {
-//   applicants:
-//     createApplicant: function () {
+test('convert', function (t) {
+  const pi = fixtures.tradle['tradle.PersonalInfo']
+  const applicant = convert.toOnfido(pi)
+  t.same(applicant, {
+    first_name: pi.firstName,
+    last_name: pi.lastName,
+    email: pi.emailAddress,
+    gender: pi.sex.title
+  })
 
-//     }
-//   }
-// }
+  const license = fixtures.tradle['tradle.DrivingLicense']
+  const olicense = convert.toOnfido(license)
+  t.same(olicense, {
+    file: parseDataUri(license.photos[0].url).data,
+    filename: 'license.jpg',
+    type: 'driving_license'
+  })
+
+  t.throws(() => convert.toTradle({ document_type: 'booglie' }))
+  t.throws(() => convert.toOnfido({ [TYPE]: 'tradle.SomeType' }))
+  t.end()
+})
 
 // possible flows
 //   1 step
@@ -69,7 +79,7 @@ test('create applicant', co(function* (t) {
 
   const db = onfido.db
   db.once('applicant:queue', function (applicant) {
-    const props = tradle.utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
+    const props = utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
     t.same(props, {
       applicant: APPLICANT_NAME,
       personalInfo: PERSONAL_INFO_KEY,
@@ -78,7 +88,7 @@ test('create applicant', co(function* (t) {
   })
 
   db.once('applicant:create', co(function* (applicant) {
-    const props = tradle.utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
+    const props = utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
     t.same(props, {
       applicant: APPLICANT_NAME,
       personalInfo: PERSONAL_INFO_KEY,
@@ -111,7 +121,7 @@ test('create applicant', co(function* (t) {
     const docEvents = Promise.map(['document:create', 'document:complete'], function (event) {
       return new Promise(resolve => {
         db.once(event, function (document) {
-          const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
+          const props = utils.pick(document, ['applicant', 'link', 'status', 'result'])
           t.same(props, {
             applicant: APPLICANT_NAME,
             link: DOC_KEY,
@@ -162,7 +172,7 @@ test('create applicant', co(function* (t) {
     const db = onfido.db
     const docQueued = new Promise(resolve => {
       db.once('document:queue', function (document) {
-        const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
+        const props = utils.pick(document, ['applicant', 'link', 'status'])
         t.same(props, {
           applicant: APPLICANT_NAME,
           link: DOC_KEY,
@@ -175,7 +185,7 @@ test('create applicant', co(function* (t) {
 
     const docCreated = new Promise(resolve => {
       db.once('document:create', function (document) {
-        const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
+        const props = utils.pick(document, ['applicant', 'link', 'status'])
         t.same(props, {
           applicant: APPLICANT_NAME,
           link: DOC_KEY,
@@ -188,7 +198,7 @@ test('create applicant', co(function* (t) {
 
     // const docChecked = new Promise(resolve => {
     //   db.once('document:checked', function (document) {
-    //     const props = tradle.utils.pick(document, ['applicant', 'link', 'resultStatus', 'report'])
+    //     const props = utils.pick(document, ['applicant', 'link', 'resultStatus', 'report'])
     //     t.same(props, {
     //       applicant: APPLICANT_NAME,
     //       link: DOC_KEY,
@@ -202,7 +212,7 @@ test('create applicant', co(function* (t) {
 
     const docVerified = new Promise(resolve => {
       db.once('document:complete', function (document) {
-        const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
+        const props = utils.pick(document, ['applicant', 'link', 'status', 'result'])
         t.same(props, {
           applicant: APPLICANT_NAME,
           link: DOC_KEY,
@@ -265,9 +275,9 @@ test('create applicant', co(function* (t) {
 })
 
 // test.skip('integration', co(function* (t) {
-//   const rawKeeper = tradle.utils.levelup('./test.db')
+//   const rawKeeper = utils.levelup('./test.db')
 //   const keeper = Promise.promisifyAll(rawKeeper)
-//   const changes = changesFeed(tradle.utils.levelup('./log.db'))
+//   const changes = changesFeed(utils.levelup('./log.db'))
 //   const api = new Onfido({ token: process.env.ONFIDO_API_KEY })
 //   const onfido = createOnfido({
 //     node: mockNode({ keeper: rawKeeper, changes }),
@@ -344,7 +354,7 @@ function mockClient (opts) {
   const node = mockNode()
   const client = createOnfido({
     node: node,
-    db: 'test',
+    path: 'test',
     api: mockAPI(opts)
   })
 
@@ -366,7 +376,7 @@ function mockNode () {
   }
 
   ee._createDB = function (path) {
-    return tradle.utils.levelup(path, { db: memdown })
+    return utils.levelup(path, { db: memdown })
   }
 
   return ee
@@ -408,10 +418,10 @@ function mockAPI ({ applicant, document, check, report }) {
 }
 
 function adjustCheck (obj, props) {
-  const copy = tradle.utils.clone(obj, props)
+  const copy = utils.clone(obj, props)
   if (copy.reports) {
     copy.reports = copy.reports.map(r => {
-      return tradle.utils.clone(r, props)
+      return utils.clone(r, props)
     })
   }
 

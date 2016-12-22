@@ -14,6 +14,7 @@ const topics = require('./topics')
 const status = require('./status')
 const getDocumentStatus = status.getDocumentStatus
 const tradleToOnfidoType = require('./typemap')
+const convert = require('./convert')
 
 module.exports = function processor (opts) {
   let { api, db, changes, keeper } = opts
@@ -138,7 +139,7 @@ module.exports = function processor (opts) {
   })
 
   const createApplicant = co(function* createApplicant ({ applicant, personalInfo }, enc, cb) {
-    const data = personalInfoToOnfidoApplicant(personalInfo)
+    const data = convert.toOnfido(personalInfo.object)
     const onfidoApplicant = yield api.applicants.createApplicant(data)
     const put = db.storeOnfidoResource(onfidoApplicant)
     const append = changes.appendAsync({
@@ -178,8 +179,9 @@ module.exports = function processor (opts) {
    * @param {Function} cb
    */
   const checkDocument = co(function* checkDocument ({ applicant, link, object }, enc, cb) {
+    const converted = convert.toOnfido(object)
     const { id } = yield db.getApplicant(applicant)
-    const document = yield api.applicants.uploadDocument(toOnfidoDocument(object))
+    const document = yield api.applicants.uploadDocument(converted)
     const check = yield api.checks.createDocumentCheck(id)
     const putDoc = db.storeOnfidoResource(document)
     const putCheck = db.storeOnfidoResource(omit(check, ['reports']))
@@ -216,27 +218,4 @@ module.exports = function processor (opts) {
   checkDocuments()
   checkReports()
   return ee
-}
-
-function personalInfoToOnfidoApplicant (personalInfo) {
-  // TODO: get telephone, addresses, etc.
-  return {
-    first_name: personalInfo.firstName,
-    last_name: personalInfo.lastName,
-    email: personalInfo.emailAddress,
-  }
-}
-
-function dataUriToBuffer (uri) {
-  const idx = uri.indexOf('base64,')
-  return new Buffer(uri.slice(idx + 7), 'base64')
-}
-
-function toOnfidoDocument (doc) {
-  const type = tradleToOnfidoType[doc[TYPE]]
-  if (!type) throw new Error('unsupported document type: ' + doc[TYPE])
-  return {
-    type: type,
-    file: dataUriToBuffer(doc.photos[0].url)
-  }
 }

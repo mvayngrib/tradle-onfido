@@ -9,29 +9,23 @@ const topics = require('./topics')
 const status = require('./status')
 const getDocumentStatus = status.getDocumentStatus
 
-module.exports = function actions (opts) {
+module.exports = exports = createClient
+exports.convert = require('./convert')
+
+function createClient (opts) {
   typeforce({
-    db: typeforce.String,
+    path: typeforce.String,
     api: typeforce.Object,
     node: typeforce.Object
   }, opts)
 
-  const node = opts.node
+  const { path, api, node } = opts
   let { keeper, changes } = node
-  const db = createDB({
-    db: opts.db,
-    node: node
-  })
-
-  const processor = createProcessor({
-    api: opts.api,
-    changes: changes,
-    keeper: keeper,
-    db: db
-  })
+  const db = createDB({ path, node })
+  const processor = createProcessor({ api, changes, keeper, db })
 
   changes = Promise.promisifyAll(changes)
-  const { webhooks } = opts.api
+  const { webhooks } = api
   return {
     createApplicant: function (opts) {
       typeforce({
@@ -149,6 +143,7 @@ module.exports = function actions (opts) {
       return db.getOnfidoResource(id)
     },
     db: db,
+    api: api,
     close: co(function* () {
       return db.close()
     })
