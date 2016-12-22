@@ -79,8 +79,8 @@ module.exports = function onfido (opts) {
 
   const sep = applicants.separator
   ;['status', 'id'].forEach(prop => {
-    indexes.applicants[prop] = applicants.by(prop, val => {
-      return val[prop] + sep + val.applicant
+    indexes.applicants[prop] = applicants.by(prop, state => {
+      return state[prop] + sep + state.applicant
     })
   })
 
@@ -141,18 +141,23 @@ module.exports = function onfido (opts) {
         newState.status === status.document.complete
 
     if (justCompleted) {
-      if (newState.result === 'clear') {
-        return ee.emit('document:verified', newState)
-      } else if (newState.result === 'consider') {
-        return ee.emit('document:consider', newState)
-      }
+      ee.emit('document:complete', newState)
+      // if (newState.result === 'clear') {
+      //   return ee.emit('document:verified', newState)
+      // } else if (newState.result === 'consider') {
+      //   return ee.emit('document:consider', newState)
+      // }
     }
   })
 
-  ;['status', 'result', 'id'].forEach(prop => {
-    indexes.documents[prop] = documents.by(prop, val => {
-      return val[prop] + sep + val.link
+  ;['status', 'report', 'result', 'id'].forEach(prop => {
+    indexes.documents[prop] = documents.by(prop, state => {
+      return state[prop] + sep + state.link
     })
+  })
+
+  indexes.documents.statusForApplicant = documents.by('statusForApplicant', state => {
+    return state.applicant + sep + state.status + sep + state.link
   })
 
   function getApplicant (permalink) {
@@ -164,10 +169,25 @@ module.exports = function onfido (opts) {
   }
 
   const getPendingDocument = co(function* getPendingDocument (applicant) {
-    const results = yield collect(indexes.documents.status.createReadStream({
+    typeforce(typeforce.String, applicant)
+
+    // console.log(applicant + sep + status.document.created)
+    // console.log(applicant + sep + status.document.checked)
+    const results = yield collect(indexes.documents.statusForApplicant.createReadStream({
       keys: false,
-      gte: status.document.created,
-      lt: status.document.checked
+      gte: applicant + sep + status.document.created,
+      lt: applicant + sep + status.document.checked
+    }))
+
+    return results[0]
+  })
+
+  const getDocumentByReportId = co(function* getDocumentByReportId (id) {
+    typeforce(typeforce.String, id)
+
+    const results = yield collect(indexes.documents.report.createReadStream({
+      keys: false,
+      eq: id
     }))
 
     return results[0]
@@ -249,6 +269,7 @@ module.exports = function onfido (opts) {
     getApplicant,
     getDocument,
     getPendingDocument,
+    getDocumentByReportId,
     storeOnfidoResource,
     updateOnfidoResource,
     getOnfidoResource,

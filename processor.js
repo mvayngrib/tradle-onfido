@@ -191,7 +191,7 @@ module.exports = function processor (opts) {
       status: getDocumentStatus(check),
       result: check.result,
       check: check.id,
-      report: check.reports[0].id
+      report: check.reports.find(r => r.name === 'document').id
     })
 
     try {

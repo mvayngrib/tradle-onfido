@@ -89,7 +89,7 @@ module.exports = function actions (opts) {
           case 'report': {
             if (action === 'report.completed') {
               const id = object.id
-              const doc = yield db.getPendingDocument()
+              const doc = yield db.getDocumentByReportId(id)
               entry = {
                 topic: topics.documentstatus,
                 link: doc.link,

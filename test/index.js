@@ -25,17 +25,21 @@ const fixtures = {
 
 // const keeper = Promise.promisifyAll(testHelpers.keeper())
 
+const APPLICANT = fixtures.applicants[0]
+const APPLICANT_NAME = APPLICANT.first_name
+const PERSONAL_INFO_KEY = APPLICANT_NAME + '-personalInfo'
+const DOC_KEY = APPLICANT_NAME + '-doc'
 const putTestData = co(function* (keeper) {
   yield Promise.all([
-    keeper.putAsync('bob', { name: 'bob' }),
-    keeper.putAsync('bobinfo', {
-      firstName: 'bob',
-      lastName: 'bobble',
-      emailAddress: 'bob@bobble.com',
+    keeper.putAsync(APPLICANT_NAME, { name: APPLICANT_NAME }),
+    keeper.putAsync(PERSONAL_INFO_KEY, {
+      firstName: APPLICANT_NAME,
+      lastName: APPLICANT.last_name,
+      emailAddress: APPLICANT.email,
     }),
-    keeper.putAsync('bobdoc', {
-      _t: 'tradle.Passport',
-      passportNumber: '1234567890',
+    keeper.putAsync(DOC_KEY, {
+      _t: 'tradle.DrivingLicense',
+      licenseNumber: '1234567890',
       photos: [{ url: '..some data uri..' }]
     })
   ])
@@ -67,8 +71,8 @@ test('create applicant', co(function* (t) {
   db.once('applicant:queue', function (applicant) {
     const props = tradle.utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
     t.same(props, {
-      applicant: 'bob',
-      personalInfo: 'bobinfo',
+      applicant: APPLICANT_NAME,
+      personalInfo: PERSONAL_INFO_KEY,
       status: status.applicant.new
     })
   })
@@ -76,8 +80,8 @@ test('create applicant', co(function* (t) {
   db.once('applicant:create', co(function* (applicant) {
     const props = tradle.utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
     t.same(props, {
-      applicant: 'bob',
-      personalInfo: 'bobinfo',
+      applicant: APPLICANT_NAME,
+      personalInfo: PERSONAL_INFO_KEY,
       status: status.applicant.created
     })
 
@@ -85,454 +89,216 @@ test('create applicant', co(function* (t) {
     t.end()
   }))
 
-  // const keeper = Promise.promisifyAll(onfido.node.keeper)
-  // yield Promise.all([
-  //   keeper.put('bob', { name: 'bob' }),
-  //   keeper.put('bobinfo', {
-  //     firstName: 'bob',
-  //     lastName: 'bobble',
-  //     emailAddress: 'bob@bobble.com',
-  //   })
-  // ])
-
-  yield onfido.createApplicant({ applicant: 'bob', personalInfo: 'bobinfo' })
+  yield onfido.createApplicant({ applicant: APPLICANT_NAME, personalInfo: PERSONAL_INFO_KEY })
 }))
 
-test('one step clear', co(function* (t) {
-  const applicant = fixtures.applicants[0]
-  const applicantId = applicant.id
-  const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'complete', result: 'clear' })
-  const document = fixtures.documents[applicantId][0]
-  const onfido = mockClient({
-    applicant: applicant,
-    check: check,
-    document: document,
-    report: check.reports[0]
-  })
+;['clear', 'consider'].forEach(result => {
+  test('one step ' + result, co(function* (t) {
+    const applicant = fixtures.applicants[0]
+    const applicantId = applicant.id
+    const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'complete', result })
+    const document = fixtures.documents[applicantId][0]
+    const onfido = mockClient({
+      applicant: applicant,
+      check: check,
+      document: document,
+      report: check.reports[0]
+    })
 
-  yield putTestData(onfido.node.keeper)
+    yield putTestData(onfido.node.keeper)
 
-  const db = onfido.db
-  const docEvents = Promise.map(['document:create', 'document:verified'], function (event) {
-    return new Promise(resolve => {
-      db.once(event, function (document) {
-        const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
-        t.same(props, {
-          applicant: 'bob',
-          link: 'bobdoc',
-          status: status.document.complete,
-          result: 'clear'
+    const db = onfido.db
+    const docEvents = Promise.map(['document:create', 'document:complete'], function (event) {
+      return new Promise(resolve => {
+        db.once(event, function (document) {
+          const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
+          t.same(props, {
+            applicant: APPLICANT_NAME,
+            link: DOC_KEY,
+            status: status.document.complete,
+            result
+          })
+
+          resolve()
         })
-
-        resolve()
       })
     })
-  })
 
-  yield onfido.createApplicant({ applicant: 'bob', personalInfo: 'bobinfo' })
-  yield onfido.checkDocument({
-    applicant: 'bob',
-    link: 'bobdoc'
-  })
-
-  yield docEvents
-  t.notOk(yield onfido.db.getPendingDocument())
-
-  const verified = yield collect(onfido.db.streamVerifiedDocuments())
-  t.equal(verified.length, 1)
-
-  const failed = yield collect(onfido.db.streamFailedDocuments())
-  t.equal(failed.length, 0)
-
-  yield cleanup(onfido)
-  t.end()
-}))
-
-test('one step consider', co(function* (t) {
-  const applicant = fixtures.applicants[0]
-  const applicantId = applicant.id
-  const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'complete', result: 'consider' })
-  const document = fixtures.documents[applicantId][0]
-  const onfido = mockClient({
-    applicant: applicant,
-    check: check,
-    document: document,
-    report: check.reports[0]
-  })
-
-  yield putTestData(onfido.node.keeper)
-
-  const db = onfido.db
-  const docEvents = Promise.map(['document:create', 'document:consider'], function (event) {
-    return new Promise(resolve => {
-      db.once(event, function (document) {
-        const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
-        t.same(props, {
-          applicant: 'bob',
-          link: 'bobdoc',
-          status: status.document.complete,
-          result: 'consider'
-        })
-
-        resolve()
-      })
+    yield onfido.createApplicant({ applicant: APPLICANT_NAME, personalInfo: PERSONAL_INFO_KEY })
+    yield onfido.checkDocument({
+      applicant: APPLICANT_NAME,
+      link: DOC_KEY
     })
-  })
 
-  yield onfido.createApplicant({ applicant: 'bob', personalInfo: 'bobinfo' })
-  yield onfido.checkDocument({
-    applicant: 'bob',
-    link: 'bobdoc'
-  })
+    yield docEvents
+    t.notOk(yield onfido.db.getPendingDocument(APPLICANT_NAME))
 
-  yield docEvents
-  t.notOk(yield onfido.db.getPendingDocument())
+    const verified = yield collect(onfido.db.streamVerifiedDocuments())
+    t.equal(verified.length, result === 'clear' ? 1 : 0)
 
-  const verified = yield collect(onfido.db.streamVerifiedDocuments())
-  t.equal(verified.length, 0)
+    const failed = yield collect(onfido.db.streamFailedDocuments())
+    t.equal(failed.length, result === 'clear' ? 0 : 1)
 
-  const failed = yield collect(onfido.db.streamFailedDocuments())
-  t.equal(failed.length, 1)
-
-  yield cleanup(onfido)
-  t.end()
-}))
-
-test('two step clear', co(function* (t) {
-  const applicant = fixtures.applicants[0]
-  const applicantId = applicant.id
-  const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'in_progress' })
-  const document = fixtures.documents[applicantId][0]
-  const pendingReport = check.reports[0]
-  const completeReport = adjustCheck(pendingReport, { status: 'complete', result: 'clear' })
-  const onfido = mockClient({
-    applicant: applicant,
-    check: check,
-    document: document,
-    report: completeReport
-  })
-
-  yield putTestData(onfido.node.keeper)
-
-  const db = onfido.db
-  const docQueued = new Promise(resolve => {
-    db.once('document:queue', function (document) {
-      const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
-      t.same(props, {
-        applicant: 'bob',
-        link: 'bobdoc',
-        status: status.document.new
-      })
-
-      resolve()
-    })
-  })
-
-  const docCreated = new Promise(resolve => {
-    db.once('document:create', function (document) {
-      const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
-      t.same(props, {
-        applicant: 'bob',
-        link: 'bobdoc',
-        status: status.getDocumentStatus(check)
-      })
-
-      resolve()
-    })
-  })
-
-  // const docChecked = new Promise(resolve => {
-  //   db.once('document:checked', function (document) {
-  //     const props = tradle.utils.pick(document, ['applicant', 'link', 'resultStatus', 'report'])
-  //     t.same(props, {
-  //       applicant: 'bob',
-  //       link: 'bobdoc',
-  //       report: '1',
-  //       resultStatus: '1'
-  //     })
-
-  //     resolve()
-  //   })
-  // })
-
-  const docVerified = new Promise(resolve => {
-    db.once('document:verified', function (document) {
-      const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
-      t.same(props, {
-        applicant: 'bob',
-        link: 'bobdoc',
-        status: status.document.complete,
-        result: 'clear'
-      })
-
-      resolve()
-    })
-  })
-
-  // const keeper = Promise.promisifyAll(onfido.node.keeper)
-  // yield onfido.createApplicant({ applicant: 'bob', personalInfo: 'bobinfo' })
-  // yield Promise.all([
-  //   keeper.put('bob', { name: 'bob' }),
-  //   keeper.put('bobinfo', {
-  //     firstName: 'bob',
-  //     lastName: 'bobble',
-  //     emailAddress: 'bob@bobble.com',
-  //   }),
-  //   keeper.put('bobdoc', {
-  //     _t: 'tradle.Passport',
-  //     passportNumber: '1234567890',
-  //     photos: [{ url: '..some data uri..' }]
-  //   })
-  // ])
-
-  yield onfido.createApplicant({ applicant: 'bob', personalInfo: 'bobinfo' })
-  yield onfido.checkDocument({
-    applicant: 'bob',
-    link: 'bobdoc'
-  })
-
-  yield Promise.all([docQueued, docCreated])
-  t.ok(yield onfido.db.getPendingDocument())
-
-  const webhookReq = new PassThrough()
-  webhookReq.write(JSON.stringify({
-    payload: {
-      resource_type: 'report',
-      action: 'report.completed',
-      object: {
-        id: pendingReport.id,
-        status: 'completed',
-        completed_at: new Date().toJSON(), // for correct format
-        href: pendingReport.href
-      }
-    }
+    yield cleanup(onfido)
+    t.end()
   }))
 
-  webhookReq.end()
+  test('two step ' + result, co(function* (t) {
+    const applicant = fixtures.applicants[0]
+    const applicantId = applicant.id
+    const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'in_progress' })
+    const document = fixtures.documents[applicantId][0]
+    const pendingReport = check.reports[0]
+    const completeReport = adjustCheck(pendingReport, { status: 'complete', result })
+    const onfido = mockClient({
+      applicant: applicant,
+      check: check,
+      document: document,
+      report: completeReport
+    })
 
-  const webhookRes = {
-    status: function (code) {
-      t.equal(code, 200)
-      return webhookRes
-    },
-    end: function () {
-      // t.pass()
+    yield putTestData(onfido.node.keeper)
+
+    const db = onfido.db
+    const docQueued = new Promise(resolve => {
+      db.once('document:queue', function (document) {
+        const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
+        t.same(props, {
+          applicant: APPLICANT_NAME,
+          link: DOC_KEY,
+          status: status.document.new
+        })
+
+        resolve()
+      })
+    })
+
+    const docCreated = new Promise(resolve => {
+      db.once('document:create', function (document) {
+        const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
+        t.same(props, {
+          applicant: APPLICANT_NAME,
+          link: DOC_KEY,
+          status: status.getDocumentStatus(check)
+        })
+
+        resolve()
+      })
+    })
+
+    // const docChecked = new Promise(resolve => {
+    //   db.once('document:checked', function (document) {
+    //     const props = tradle.utils.pick(document, ['applicant', 'link', 'resultStatus', 'report'])
+    //     t.same(props, {
+    //       applicant: APPLICANT_NAME,
+    //       link: DOC_KEY,
+    //       report: '1',
+    //       resultStatus: '1'
+    //     })
+
+    //     resolve()
+    //   })
+    // })
+
+    const docVerified = new Promise(resolve => {
+      db.once('document:complete', function (document) {
+        const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
+        t.same(props, {
+          applicant: APPLICANT_NAME,
+          link: DOC_KEY,
+          status: status.document.complete,
+          result
+        })
+
+        resolve()
+      })
+    })
+
+    yield onfido.createApplicant({ applicant: APPLICANT_NAME, personalInfo: PERSONAL_INFO_KEY })
+    yield onfido.checkDocument({
+      applicant: APPLICANT_NAME,
+      link: DOC_KEY
+    })
+
+    yield Promise.all([docQueued, docCreated])
+    t.ok(yield onfido.db.getPendingDocument(APPLICANT_NAME))
+
+    const webhookReq = new PassThrough()
+    webhookReq.write(JSON.stringify({
+      payload: {
+        resource_type: 'report',
+        action: 'report.completed',
+        object: {
+          id: pendingReport.id,
+          status: 'completed',
+          completed_at: new Date().toJSON(), // for correct format
+          href: pendingReport.href
+        }
+      }
+    }))
+
+    webhookReq.end()
+
+    const webhookRes = {
+      status: function (code) {
+        t.equal(code, 200)
+        return webhookRes
+      },
+      end: function () {
+        // t.pass()
+      }
     }
-  }
 
-  yield onfido.processEvent(webhookReq, webhookRes)
-  yield docVerified
-  t.notOk(yield onfido.db.getPendingDocument())
+    yield onfido.processEvent(webhookReq, webhookRes)
+    yield docVerified
+    t.notOk(yield onfido.db.getPendingDocument(APPLICANT_NAME))
 
-  yield cleanup(onfido)
-  t.end()
-}))
+    const verified = yield collect(onfido.db.streamVerifiedDocuments())
+    t.equal(verified.length, result === 'clear' ? 1 : 0)
 
-// test.skip('basic', co(function* (t) {
-//   // const rawKeeper = testHelpers.keeper()
-//   // const keeper = Promise.promisifyAll(rawKeeper)
-//   const changes = testHelpers.nextFeed()
-//   const logan = fixtures.applicants[0]
-//   const applicantId = logan.id
-//   const checks = fixtures.checks[applicantId]
-//   const check = checks[0]
-//   const documents = fixtures.documents[applicantId]
-//   const api = {
-//     applicants: {
-//       createApplicant: function (applicantData) {
-//         return Promise.resolve(logan)
-//       },
-//       uploadDocument: function (applicantId, doc) {
-//         return Promise.resolve(documents[0])
-//       }
-//     },
-//     checks: {
-//       createDocumentCheck: function (id) {
-//         return Promise.resolve(check)
-//       }
-//     },
-//     reports: {
-//       get: function (id) {
-//         const report = checks.reports.find(report => report.id === id)
-//         // const clear = tradle.utils.clone(report, { result: 'clear' })
-//         return Promise.resolve(report)
-//       }
-//     },
-//     webhooks: {
-//       handleEvent: co(function* (req) {
-//         const body = yield collect(req)
-//         return JSON.parse(body).payload
-//       })
-//     }
-//   }
+    const failed = yield collect(onfido.db.streamFailedDocuments())
+    t.equal(failed.length, result === 'clear' ? 0 : 1)
 
-//   // const onfido = createOnfido({
-//   //   node: mockNode({ keeper, changes }),
-//   //   db: 'test',
-//   //   api: api
+    yield cleanup(onfido)
+    t.end()
+  }))
+})
+
+// test.skip('integration', co(function* (t) {
+//   const rawKeeper = tradle.utils.levelup('./test.db')
+//   const keeper = Promise.promisifyAll(rawKeeper)
+//   const changes = changesFeed(tradle.utils.levelup('./log.db'))
+//   const api = new Onfido({ token: process.env.ONFIDO_API_KEY })
+//   const onfido = createOnfido({
+//     node: mockNode({ keeper: rawKeeper, changes }),
+//     db: 'test',
+//     api: api
+//   })
+
+//   const applicantId = '0cc317bc-00a5-4e4b-8085-4485fceab85a'
+//   const photo = parseDataUri(fixtures.docImages.driving_license)
+//   // const doc = yield api.applicants.uploadDocument(applicantId, {
+//   //   file: photo.data,
+//   //   filename: 'license.' + photo.mimeType.split('/')[1],
+//   //   type: 'driving_licence'
 //   // })
 
-//   const db = onfido.db
-//   db.once('applicant:queue', function (applicant) {
-//     const props = tradle.utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
-//     t.same(props, {
-//       applicant: 'bob',
-//       personalInfo: 'bobinfo',
-//       status: status.applicant.new
-//     })
-//   })
+//   const doc = require('./fixtures/documents')[0]
+//   // const check = yield api.checks.createDocumentCheck(applicantId)
 
-//   db.once('applicant:create', function (applicant) {
-//     const props = tradle.utils.pick(applicant, ['applicant', 'personalInfo', 'status'])
-//     t.same(props, {
-//       applicant: 'bob',
-//       personalInfo: 'bobinfo',
-//       status: status.applicant.created
-//     })
-//   })
+//   const check = require('./fixtures/checks')[0]
+//   // console.log(check)
+//   // const applicants = require('./fixtures/applicants.json')
+//   // const checks = {}
+//   // yield Promise.all(applicants.map(co(function* ({ id }) {
+//   //   checks[id] = yield api.checks.list({ applicantId: id, expandReports: true })
+//   // })))
 
-//   db.once('document:queue', function (document) {
-//     const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
-//     t.same(props, {
-//       applicant: 'bob',
-//       link: 'bobdoc',
-//       status: status.document.new
-//     })
-//   })
+//   // yield fs.writeFileAsync(path.resolve(__dirname, './fixtures/checks.json'), JSON.stringify(checks, null, 2))
 
-//   const docCreated = new Promise(resolve => {
-//     db.once('document:create', function (document) {
-//       const props = tradle.utils.pick(document, ['applicant', 'link', 'status'])
-//       t.same(props, {
-//         applicant: 'bob',
-//         link: 'bobdoc',
-//         status: check.status
-//       })
-
-//       resolve()
-//     })
-//   })
-
-//   // const docChecked = new Promise(resolve => {
-//   //   db.once('document:checked', function (document) {
-//   //     const props = tradle.utils.pick(document, ['applicant', 'link', 'resultStatus', 'report'])
-//   //     t.same(props, {
-//   //       applicant: 'bob',
-//   //       link: 'bobdoc',
-//   //       report: '1',
-//   //       resultStatus: '1'
-//   //     })
-
-//   //     resolve()
-//   //   })
-//   // })
-
-//   const docVerified = new Promise(resolve => {
-//     db.once('document:verified', function (document) {
-//       const props = tradle.utils.pick(document, ['applicant', 'link', 'status', 'result'])
-//       t.same(props, {
-//         applicant: 'bob',
-//         link: 'bobdoc',
-//         status: status.document.complete,
-//         result: 'clear'
-//       })
-
-//       resolve()
-//     })
-//   })
-
-//   yield Promise.all([
-//     keeper.put('bob', { name: 'bob' }),
-//     keeper.put('bobinfo', {
-//       firstName: 'bob',
-//       lastName: 'bobble',
-//       emailAddress: 'bob@bobble.com',
-//     }),
-//     keeper.put('bobdoc', {
-//       _t: 'tradle.Passport',
-//       passportNumber: '1234567890',
-//       photos: [{ url: '..some data uri..' }]
-//     })
-//   ])
-
-//   yield onfido.createApplicant({ applicant: 'bob', personalInfo: 'bobinfo' })
-//   yield onfido.checkDocument({
-//     applicant: 'bob',
-//     link: 'bobdoc'
-//   })
-
-//   yield docCreated
-//   const report = fixtures.reports[0]
-//   const webhookReq = new PassThrough()
-//   webhookReq.write(JSON.stringify({
-//     payload: {
-//       resource_type: 'report',
-//       action: 'report.completed',
-//       object: {
-//         id: report.id,
-//         status: 'completed',
-//         completed_at: '2014-05-23T13:50:33Z',
-//         href: 'https://api.onfido.com/v2/checks/12343-11122-09290/reports/12345-23122-32123'
-//       }
-//     }
-//   }))
-
-//   webhookReq.end()
-
-//   const webhookRes = {
-//     status: function (code) {
-//       t.equal(code, 200)
-//       return webhookRes
-//     },
-//     end: function () {
-//       t.pass()
-//     }
-//   }
-
-//   yield onfido.processEvent(webhookReq, webhookRes)
-//   yield docVerified
-//   const pending = yield onfido.db.getPendingDocument()
-//   t.equal(pending, undefined)
+//   // yield fs.writeFileAsync(path.resolve(__dirname, './fixtures/applicants.json'), JSON.stringify(applicants, null, 2))
 //   t.end()
 // }))
-
-test.skip('integration', co(function* (t) {
-  const rawKeeper = tradle.utils.levelup('./test.db')
-  const keeper = Promise.promisifyAll(rawKeeper)
-  const changes = changesFeed(tradle.utils.levelup('./log.db'))
-  const api = new Onfido({ token: process.env.ONFIDO_API_KEY })
-  const onfido = createOnfido({
-    node: mockNode({ keeper: rawKeeper, changes }),
-    db: 'test',
-    api: api
-  })
-
-  const applicantId = '0cc317bc-00a5-4e4b-8085-4485fceab85a'
-  const photo = parseDataUri(fixtures.docImages.driving_license)
-  // const doc = yield api.applicants.uploadDocument(applicantId, {
-  //   file: photo.data,
-  //   filename: 'license.' + photo.mimeType.split('/')[1],
-  //   type: 'driving_licence'
-  // })
-
-  const doc = require('./fixtures/documents')[0]
-  // const check = yield api.checks.createDocumentCheck(applicantId)
-
-  const check = require('./fixtures/checks')[0]
-  // console.log(check)
-  // const applicants = require('./fixtures/applicants.json')
-  // const checks = {}
-  // yield Promise.all(applicants.map(co(function* ({ id }) {
-  //   checks[id] = yield api.checks.list({ applicantId: id, expandReports: true })
-  // })))
-
-  // yield fs.writeFileAsync(path.resolve(__dirname, './fixtures/checks.json'), JSON.stringify(checks, null, 2))
-
-  // yield fs.writeFileAsync(path.resolve(__dirname, './fixtures/applicants.json'), JSON.stringify(applicants, null, 2))
-  t.end()
-}))
-
-// 0cc317bc-00a5-4e4b-8085-4485fceab85a
 
 const createApplicantFixtures = co(function* createApplicantFixtures () {
   const api = new Onfido({ token: process.env.ONFIDO_API_KEY })
