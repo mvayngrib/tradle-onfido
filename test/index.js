@@ -18,6 +18,7 @@ const createOnfidoDB = require('../lib/db')
 const status = require('../lib/status')
 const convert = require('../lib/convert')
 const createOnfido = require('../')
+const mock = require('./mock')
 const fixtures = {
   applicants: require('./fixtures/applicants'),
   checks: require('./fixtures/checks'),
@@ -74,7 +75,7 @@ test('convert', function (t) {
 test('create applicant', co(function* (t) {
   const applicant = fixtures.applicants[0]
   const applicantId = applicant.id
-  const onfido = mockClient({ applicant })
+  const onfido = mock.client({ applicant })
   yield putTestData(onfido.node.keeper)
 
   const db = onfido.db
@@ -108,7 +109,7 @@ test('create applicant', co(function* (t) {
     const applicantId = applicant.id
     const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'complete', result })
     const document = fixtures.documents[applicantId][0]
-    const onfido = mockClient({
+    const onfido = mock.client({
       applicant: applicant,
       check: check,
       document: document,
@@ -160,7 +161,7 @@ test('create applicant', co(function* (t) {
     const document = fixtures.documents[applicantId][0]
     const pendingReport = check.reports[0]
     const completeReport = adjustCheck(pendingReport, { status: 'complete', result })
-    const onfido = mockClient({
+    const onfido = mock.client({
       applicant: applicant,
       check: check,
       document: document,
@@ -275,7 +276,7 @@ test('create applicant', co(function* (t) {
 })
 
 test('register webhook', co(function* (t) {
-  const onfido = mockClient({})
+  const onfido = mock.client({})
   const api = onfido.api
   const url = 'someurl'
   const events = ['report.completed']
@@ -325,7 +326,7 @@ test('register webhook', co(function* (t) {
 //   const changes = changesFeed(utils.levelup('./log.db'))
 //   const api = new Onfido({ token: process.env.ONFIDO_API_KEY })
 //   const onfido = createOnfido({
-//     node: mockNode({ keeper: rawKeeper, changes }),
+//     node: mock.Node({ keeper: rawKeeper, changes }),
 //     db: 'test',
 //     api: api
 //   })
@@ -394,77 +395,6 @@ const createFixtures = co(function* createFixtures () {
   yield createCheckFixtures()
   yield createWebhookFixtures()
 })
-
-function mockClient (opts) {
-  const node = mockNode()
-  const api = mockAPI(opts)
-  const client = createOnfido({
-    node: node,
-    path: 'test',
-    api: api
-  })
-
-  client.node = node
-  return client
-}
-
-let dbCounter = 0
-function mockNode () {
-  // const keeper = testHelpers.keeper()
-
-  const logdb = Promise.promisifyAll(testHelpers.nextDB())
-  const changes = Promise.promisifyAll(changesFeed(logdb))
-  const ee = new EventEmitter()
-  ee.keeper = Promise.promisifyAll(testHelpers.keeper())
-  ee.changes = changes
-  ee.destroy = () => {
-    return logdb.closeAsync()
-  }
-
-  ee._createDB = function (path) {
-    return utils.levelup(path, { db: memdown })
-  }
-
-  return ee
-}
-
-function mockAPI ({ applicant, document, check, report }) {
-  return {
-    applicants: {
-      create: function () {
-        return Promise.resolve(applicant)
-      },
-      update: function () {
-        return Promise.resolve(applicant)
-      },
-      uploadDocument: function () {
-        return Promise.resolve(document)
-      }
-    },
-    checks: {
-      createDocumentCheck: function () {
-        return Promise.resolve(check)
-      }
-    },
-    reports: {
-      get: function (id) {
-        if (report) {
-          return Promise.resolve(report)
-        }
-
-        const match = check.reports.find(r => r.id === id)
-        if (match) Promise.resolve(match)
-        else Promise.reject(new Error('report not found'))
-      }
-    },
-    webhooks: {
-      handleEvent: co(function* (req) {
-        const body = yield collect(req)
-        return JSON.parse(body).payload
-      })
-    }
-  }
-}
 
 function adjustCheck (obj, props) {
   const copy = utils.clone(obj, props)
