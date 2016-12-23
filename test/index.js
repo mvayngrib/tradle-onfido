@@ -76,7 +76,7 @@ test('create applicant', co(function* (t) {
   const applicant = fixtures.applicants[0]
   const applicantId = applicant.id
   const onfido = mock.client({ applicant })
-  yield putTestData(onfido.node.keeper)
+  yield putTestData(onfido.keeper)
 
   const db = onfido.db
   db.once('applicant:queue', function (applicant) {
@@ -116,7 +116,7 @@ test('create applicant', co(function* (t) {
       report: check.reports[0]
     })
 
-    yield putTestData(onfido.node.keeper)
+    yield putTestData(onfido.keeper)
 
     const db = onfido.db
     const docEvents = Promise.map(['document:create', 'document:complete'], function (event) {
@@ -168,7 +168,7 @@ test('create applicant', co(function* (t) {
       report: completeReport
     })
 
-    yield putTestData(onfido.node.keeper)
+    yield putTestData(onfido.keeper)
 
     const db = onfido.db
     const docQueued = new Promise(resolve => {
@@ -409,8 +409,7 @@ function adjustCheck (obj, props) {
 
 const cleanup = co(function* cleanup (client) {
   yield Promise.all([
-    client.close(),
-    client.node.destroy()
+    client.close()
   ])
 
   memdown.clearGlobalStore()
