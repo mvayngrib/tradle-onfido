@@ -274,6 +274,51 @@ test('create applicant', co(function* (t) {
   }))
 })
 
+test('register webhook', co(function* (t) {
+  const onfido = mockClient({})
+  const api = onfido.api
+  const url = 'someurl'
+  const events = ['report.completed']
+  const eventPromises = ['register', 'unregister'].map(type => {
+    return new Promise(resolve => {
+      onfido.db.on('webhook:' + type, function (webhook) {
+        t.equal(webhook.url, url)
+        resolve()
+      })
+    })
+  })
+
+  let registered, unregistered
+  const reg = new Promise(resolve => registered = resolve)
+  const unreg = new Promise(resolve => unregistered = resolve)
+  api.registerWebhook = function (data) {
+    registered(data)
+    return Promise.resolve(data)
+  }
+
+  api.unregisterWebhook = function (data) {
+    unregistered(data)
+    return Promise.resolve(data)
+  }
+
+  yield onfido.registerWebhook({ url, events })
+  t.same(yield reg, { url, events })
+  // should not cause multiple events
+
+  yield eventPromises[0]
+  let webhooks = yield onfido.db.getWebhooks()
+  t.equal(webhooks.filter(w => w.status === status.webhook.registered).length, 1)
+
+  yield onfido.unregisterWebhook(url)
+  t.same(yield unreg, url)
+  yield eventPromises[1]
+
+  webhooks = yield onfido.db.getWebhooks()
+  t.equal(webhooks.filter(w => w.status === status.webhook.registered).length, 0)
+
+  t.end()
+}))
+
 // test.skip('integration', co(function* (t) {
 //   const rawKeeper = utils.levelup('./test.db')
 //   const keeper = Promise.promisifyAll(rawKeeper)
@@ -352,10 +397,11 @@ const createFixtures = co(function* createFixtures () {
 
 function mockClient (opts) {
   const node = mockNode()
+  const api = mockAPI(opts)
   const client = createOnfido({
     node: node,
     path: 'test',
-    api: mockAPI(opts)
+    api: api
   })
 
   client.node = node
