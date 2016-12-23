@@ -92,7 +92,7 @@ test('create applicant', co(function* (t) {
     t.same(props, {
       applicant: APPLICANT_NAME,
       personalInfo: PERSONAL_INFO_KEY,
-      status: status.applicant.created
+      status: status.applicant.uptodate
     })
 
     yield cleanup(onfido)
@@ -431,7 +431,10 @@ function mockNode () {
 function mockAPI ({ applicant, document, check, report }) {
   return {
     applicants: {
-      createApplicant: function () {
+      create: function () {
+        return Promise.resolve(applicant)
+      },
+      update: function () {
         return Promise.resolve(applicant)
       },
       uploadDocument: function () {
