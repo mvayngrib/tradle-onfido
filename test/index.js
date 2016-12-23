@@ -14,9 +14,9 @@ const changesFeed = require('changes-feed')
 const memdown = require('memdown')
 const parseDataUri = require('parse-data-uri')
 const Onfido = require('@tradle/onfido-api')
-const createOnfidoDB = require('../db')
-const status = require('../status')
-const convert = require('../convert')
+const createOnfidoDB = require('../lib/db')
+const status = require('../lib/status')
+const convert = require('../lib/convert')
 const createOnfido = require('../')
 const fixtures = {
   applicants: require('./fixtures/applicants'),
