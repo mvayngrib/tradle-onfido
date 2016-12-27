@@ -59,5 +59,13 @@
         "url": "data:image/jpeg;base64,/c36tjW3FFqAbIOCpg8wPlhJiw9/dKd4TFBP5YJ0/uI="
       }
     ]
+  },
+  "tradle.LiveFace": {
+    "_t": "tradle.LiveFace",
+    "photos": [
+      {
+        "url": "data:image/jpeg;base64,/c36tjW3FFqAbIOCpg8wPlhJiw9/dKd4TFBP5YJ0/uI="
+      }
+    ]
   }
 }

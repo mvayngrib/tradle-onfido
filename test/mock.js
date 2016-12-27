@@ -29,7 +29,7 @@ function mockClient (opts) {
   })
 }
 
-function mockAPI ({ applicant, document, check, report }) {
+function mockAPI ({ applicants, documents, checks, reports }) {
   return {
     applicants: {
       create: function (obj) {
@@ -39,12 +39,12 @@ function mockAPI ({ applicant, document, check, report }) {
           email: typeforce.String
          }, obj)
 
-        return Promise.resolve(applicant)
+        return Promise.resolve(applicants.shift())
       },
       update: function (id, obj) {
         typeforce(typeforce.String, id)
         typeforce(typeforce.Object, obj)
-        return Promise.resolve(applicant)
+        return Promise.resolve(applicants.shift())
       },
       uploadDocument: function (id, obj) {
         typeforce(typeforce.String, id)
@@ -52,13 +52,36 @@ function mockAPI ({ applicant, document, check, report }) {
           type: typeforce.String
         }, obj)
 
-        return Promise.resolve(document)
+        return Promise.resolve(documents.shift())
+      },
+      uploadLivePhoto: function (id, obj) {
+        typeforce(typeforce.String, id)
+        typeforce(typeforce.Object, obj)
+        return Promise.resolve({
+          id: 'abc'
+        })
       }
     },
     checks: {
+      get: function (opts) {
+        typeforce({
+          checkId: typeforce.String,
+          expandReports: typeforce.maybe(typeforce.Boolean)
+        }, opts)
+
+        return Promise.resolve(checks.shift())
+      },
+      create: function (id, opts) {
+        typeforce(typeforce.String, id)
+        typeforce({
+          reports: typeforce.Array
+        }, opts)
+
+        return Promise.resolve(checks.shift())
+      },
       createDocumentCheck: function (id) {
         typeforce(typeforce.String, id)
-        return Promise.resolve(check)
+        return Promise.resolve(checks.shift())
       }
     },
     reports: {
@@ -66,7 +89,7 @@ function mockAPI ({ applicant, document, check, report }) {
         typeforce(typeforce.String, id)
 
         if (report) {
-          return Promise.resolve(report)
+          return Promise.resolve(reports.shift())
         }
 
         const match = check.reports.find(r => r.id === id)

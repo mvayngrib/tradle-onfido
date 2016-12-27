@@ -13,6 +13,7 @@ const testHelpers = require('@tradle/engine/test/helpers')
 const changesFeed = require('changes-feed')
 const memdown = require('memdown')
 const parseDataUri = require('parse-data-uri')
+const omit = require('object.omit')
 const Onfido = require('@tradle/onfido-api')
 const createOnfidoDB = require('../lib/db')
 const status = require('../lib/status')
@@ -33,11 +34,13 @@ const APPLICANT = fixtures.applicants[0]
 const APPLICANT_NAME = APPLICANT.first_name
 const PERSONAL_INFO_KEY = APPLICANT_NAME + '-personalInfo'
 const DOC_KEY = APPLICANT_NAME + '-doc'
+const FACE_KEY = APPLICANT_NAME + '-face'
 const putTestData = co(function* (keeper) {
   yield Promise.all([
     keeper.putAsync(APPLICANT_NAME, { name: APPLICANT_NAME }),
     keeper.putAsync(PERSONAL_INFO_KEY, fixtures.tradle['tradle.PersonalInfo']),
-    keeper.putAsync(DOC_KEY, fixtures.tradle['tradle.DrivingLicense'])
+    keeper.putAsync(DOC_KEY, fixtures.tradle['tradle.DrivingLicense']),
+    keeper.putAsync(FACE_KEY, fixtures.tradle['tradle.LiveFace'])
   ])
 })
 
@@ -53,9 +56,9 @@ test('convert', function (t) {
 
   const license = fixtures.tradle['tradle.DrivingLicense']
   const olicense = convert.toOnfido(license)
-  t.same(olicense, {
+  t.same(omit(olicense, 'filename'), {
     file: parseDataUri(license.photos[0].url).data,
-    filename: 'license.jpg',
+    // filename: 'license.jpg',
     type: 'driving_license'
   })
 
@@ -75,7 +78,7 @@ test('convert', function (t) {
 test('create applicant', co(function* (t) {
   const applicant = fixtures.applicants[0]
   const applicantId = applicant.id
-  const onfido = mock.client({ applicant })
+  const onfido = mock.client({ applicants: [applicant] })
   yield putTestData(onfido.keeper)
 
   const db = onfido.db
@@ -110,10 +113,10 @@ test('create applicant', co(function* (t) {
     const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'complete', result })
     const document = fixtures.documents[applicantId][0]
     const onfido = mock.client({
-      applicant: applicant,
-      check: check,
-      document: document,
-      report: check.reports[0]
+      applicants: [applicant],
+      checks: [check],
+      documents: [document],
+      reports: check.reports.slice(0, 1)
     })
 
     yield putTestData(onfido.keeper)
@@ -160,12 +163,11 @@ test('create applicant', co(function* (t) {
     const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'in_progress' })
     const document = fixtures.documents[applicantId][0]
     const pendingReport = check.reports[0]
-    const completeReport = adjustCheck(pendingReport, { status: 'complete', result })
+    const completeCheck = adjustCheck(check, { status: 'complete', result })
     const onfido = mock.client({
-      applicant: applicant,
-      check: check,
-      document: document,
-      report: completeReport
+      applicants: [applicant],
+      checks: [check, completeCheck],
+      documents: [document]
     })
 
     yield putTestData(onfido.keeper)
@@ -197,20 +199,6 @@ test('create applicant', co(function* (t) {
       })
     })
 
-    // const docChecked = new Promise(resolve => {
-    //   db.once('document:checked', function (document) {
-    //     const props = utils.pick(document, ['applicant', 'link', 'resultStatus', 'report'])
-    //     t.same(props, {
-    //       applicant: APPLICANT_NAME,
-    //       link: DOC_KEY,
-    //       report: '1',
-    //       resultStatus: '1'
-    //     })
-
-    //     resolve()
-    //   })
-    // })
-
     const docVerified = new Promise(resolve => {
       db.once('document:complete', function (document) {
         const props = utils.pick(document, ['applicant', 'link', 'status', 'result'])
@@ -237,13 +225,130 @@ test('create applicant', co(function* (t) {
     const webhookReq = new PassThrough()
     webhookReq.write(JSON.stringify({
       payload: {
-        resource_type: 'report',
-        action: 'report.completed',
+        resource_type: 'check',
+        action: 'check.completed',
         object: {
-          id: pendingReport.id,
+          id: check.id,
           status: 'completed',
           completed_at: new Date().toJSON(), // for correct format
-          href: pendingReport.href
+          href: check.href
+        }
+      }
+    }))
+
+    webhookReq.end()
+
+    const webhookRes = {
+      status: function (code) {
+        t.equal(code, 200)
+        return webhookRes
+      },
+      end: function () {
+        // t.pass()
+      }
+    }
+
+    yield onfido.processEvent(webhookReq, webhookRes)
+    yield docVerified
+    t.notOk(yield onfido.db.getPendingDocument(APPLICANT_NAME))
+
+    const verified = yield collect(onfido.db.streamVerifiedDocuments())
+    t.equal(verified.length, result === 'clear' ? 1 : 0)
+
+    const failed = yield collect(onfido.db.streamFailedDocuments())
+    t.equal(failed.length, result === 'clear' ? 0 : 1)
+
+    yield cleanup(onfido)
+    t.end()
+  }))
+
+  test('three step ' + result, co(function* (t) {
+    const applicant = fixtures.applicants[0]
+    const applicantId = applicant.id
+    const check = adjustCheck(fixtures.checks[applicantId][1], { status: 'in_progress' })
+    const document = fixtures.documents[applicantId][0]
+    const pendingReport = check.reports[0]
+    const completeCheck = adjustCheck(check, { status: 'complete', result })
+    const onfido = mock.client({
+      applicants: [applicant],
+      checks: [check, completeCheck],
+      documents: [document]
+    })
+
+    yield putTestData(onfido.keeper)
+
+    const db = onfido.db
+    const docQueued = new Promise(resolve => {
+      db.once('document:queue', function (document) {
+        const props = utils.pick(document, ['applicant', 'link', 'status'])
+        t.same(props, {
+          applicant: APPLICANT_NAME,
+          link: DOC_KEY,
+          status: status.document.new
+        })
+
+        resolve()
+      })
+    })
+
+    const docCreated = new Promise(resolve => {
+      db.once('document:create', function (document) {
+        const props = utils.pick(document, ['applicant', 'link', 'status'])
+        t.same(props, {
+          applicant: APPLICANT_NAME,
+          link: DOC_KEY,
+          status: status.getDocumentStatus(check)
+        })
+
+        resolve()
+      })
+    })
+
+    const docVerified = new Promise(resolve => {
+      db.once('document:complete', function (document) {
+        const props = utils.pick(document, ['applicant', 'link', 'status', 'result'])
+        t.same(props, {
+          applicant: APPLICANT_NAME,
+          link: DOC_KEY,
+          status: status.document.complete,
+          result
+        })
+
+        resolve()
+      })
+    })
+
+    yield onfido.createApplicant({ applicant: APPLICANT_NAME, personalInfo: PERSONAL_INFO_KEY })
+    yield onfido.checkDocument({
+      applicant: APPLICANT_NAME,
+      link: DOC_KEY
+    })
+
+    yield Promise.all([docQueued, docCreated])
+    t.ok(yield onfido.db.getPendingDocument(APPLICANT_NAME))
+
+    const uploadedFace = new Promise(resolve => {
+      onfido.db.once('face:upload', resolve)
+    })
+
+    yield onfido.checkFace({
+      applicant: APPLICANT_NAME,
+      face: FACE_KEY
+    })
+
+    yield uploadedFace
+
+    const webhookReq = new PassThrough()
+    webhookReq.write(JSON.stringify({
+      payload: {
+        resource_type: 'check',
+        action: 'check.completed',
+        object: {
+          id: check.id,
+          status: 'completed',
+          completed_at: new Date().toJSON(), // for correct format
+          href: check.href,
+          reports: completeCheck.reports
         }
       }
     }))
