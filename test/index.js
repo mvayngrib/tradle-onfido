@@ -122,19 +122,16 @@ test('create applicant', co(function* (t) {
     yield putTestData(onfido.keeper)
 
     const db = onfido.db
-    const docEvents = Promise.map(['document:create', 'document:complete'], function (event) {
-      return new Promise(resolve => {
-        db.once(event, function (document) {
-          const props = utils.pick(document, ['applicant', 'link', 'status', 'result'])
-          t.same(props, {
-            applicant: APPLICANT_NAME,
-            link: DOC_KEY,
-            status: status.document.complete,
-            result
-          })
-
-          resolve()
+    const docCreated = new Promise(resolve => {
+      db.once('document:uploaded', function (document) {
+        const props = utils.pick(document, ['applicant', 'link', 'status'])
+        t.same(props, {
+          applicant: APPLICANT_NAME,
+          link: DOC_KEY,
+          status: status.document.uploaded
         })
+
+        resolve()
       })
     })
 
@@ -144,13 +141,26 @@ test('create applicant', co(function* (t) {
       link: DOC_KEY
     })
 
-    yield docEvents
-    t.notOk(yield onfido.db.getPendingDocument(APPLICANT_NAME))
+    yield docCreated
+    yield onfido.checkAgainstLatestData({
+      applicant: APPLICANT_NAME,
+      checkFace: false
+    })
 
-    const verified = yield collect(onfido.db.streamVerifiedDocuments())
+    yield new Promise(resolve => {
+      db.once('check:created', resolve)
+    })
+
+    try {
+      const check = yield db.getPendingCheck(APPLICANT_NAME)
+      t.fail('should have 0 pending checks')
+    } catch (err) {
+    }
+
+    const verified = yield collect(onfido.db.streamVerifiedChecks())
     t.equal(verified.length, result === 'clear' ? 1 : 0)
 
-    const failed = yield collect(onfido.db.streamFailedDocuments())
+    const failed = yield collect(onfido.db.streamFailedChecks())
     t.equal(failed.length, result === 'clear' ? 0 : 1)
 
     yield cleanup(onfido)
@@ -160,7 +170,7 @@ test('create applicant', co(function* (t) {
   test('two step ' + result, co(function* (t) {
     const applicant = fixtures.applicants[0]
     const applicantId = applicant.id
-    const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'in_progress' })
+    const check = adjustCheck(fixtures.checks[applicantId][0], { status: 'in_progress', result: null })
     const document = fixtures.documents[applicantId][0]
     const pendingReport = check.reports[0]
     const completeCheck = adjustCheck(check, { status: 'complete', result })
@@ -174,7 +184,7 @@ test('create applicant', co(function* (t) {
 
     const db = onfido.db
     const docQueued = new Promise(resolve => {
-      db.once('document:queue', function (document) {
+      db.once('document:queued', function (document) {
         const props = utils.pick(document, ['applicant', 'link', 'status'])
         t.same(props, {
           applicant: APPLICANT_NAME,
@@ -187,25 +197,25 @@ test('create applicant', co(function* (t) {
     })
 
     const docCreated = new Promise(resolve => {
-      db.once('document:create', function (document) {
+      db.once('document:uploaded', function (document) {
         const props = utils.pick(document, ['applicant', 'link', 'status'])
         t.same(props, {
           applicant: APPLICANT_NAME,
           link: DOC_KEY,
-          status: status.getDocumentStatus(check)
+          status: status.getCheckStatus(check)
         })
 
         resolve()
       })
     })
 
-    const docVerified = new Promise(resolve => {
-      db.once('document:complete', function (document) {
-        const props = utils.pick(document, ['applicant', 'link', 'status', 'result'])
+    const checkComplete = new Promise(resolve => {
+      db.once('check:complete', function (document) {
+        const props = utils.pick(document, ['applicant', 'document', 'status', 'result'])
         t.same(props, {
           applicant: APPLICANT_NAME,
-          link: DOC_KEY,
-          status: status.document.complete,
+          document: DOC_KEY,
+          status: status.check.complete,
           result
         })
 
@@ -220,7 +230,12 @@ test('create applicant', co(function* (t) {
     })
 
     yield Promise.all([docQueued, docCreated])
-    t.ok(yield onfido.db.getPendingDocument(APPLICANT_NAME))
+    yield onfido.checkAgainstLatestData({
+      applicant: APPLICANT_NAME,
+      checkFace: false
+    })
+
+    t.ok(yield onfido.db.getPendingCheck(APPLICANT_NAME))
 
     const webhookReq = new PassThrough()
     webhookReq.write(JSON.stringify({
@@ -249,13 +264,17 @@ test('create applicant', co(function* (t) {
     }
 
     yield onfido.processEvent(webhookReq, webhookRes)
-    yield docVerified
-    t.notOk(yield onfido.db.getPendingDocument(APPLICANT_NAME))
+    yield checkComplete
+    try {
+      yield onfido.db.getPendingCheck(APPLICANT_NAME)
+      t.fail('should have 0 pending checks')
+    } catch (err) {
+    }
 
-    const verified = yield collect(onfido.db.streamVerifiedDocuments())
+    const verified = yield collect(onfido.db.streamVerifiedChecks())
     t.equal(verified.length, result === 'clear' ? 1 : 0)
 
-    const failed = yield collect(onfido.db.streamFailedDocuments())
+    const failed = yield collect(onfido.db.streamFailedChecks())
     t.equal(failed.length, result === 'clear' ? 0 : 1)
 
     yield cleanup(onfido)
@@ -278,44 +297,30 @@ test('create applicant', co(function* (t) {
     yield putTestData(onfido.keeper)
 
     const db = onfido.db
-    const docQueued = new Promise(resolve => {
-      db.once('document:queue', function (document) {
-        const props = utils.pick(document, ['applicant', 'link', 'status'])
-        t.same(props, {
-          applicant: APPLICANT_NAME,
-          link: DOC_KEY,
-          status: status.document.new
-        })
-
-        resolve()
-      })
+    const docUploaded = new Promise(resolve => {
+      db.once('document:uploaded', resolve)
     })
 
-    const docCreated = new Promise(resolve => {
-      db.once('document:create', function (document) {
-        const props = utils.pick(document, ['applicant', 'link', 'status'])
-        t.same(props, {
-          applicant: APPLICANT_NAME,
-          link: DOC_KEY,
-          status: status.getDocumentStatus(check)
-        })
-
-        resolve()
-      })
+    const faceUploaded = new Promise(resolve => {
+      db.once('face:uploaded', resolve)
     })
 
-    const docVerified = new Promise(resolve => {
-      db.once('document:complete', function (document) {
-        const props = utils.pick(document, ['applicant', 'link', 'status', 'result'])
+    const checkComplete = new Promise(resolve => {
+      db.once('check:complete', function (check) {
+        const props = utils.pick(check, ['applicant', 'document', 'status', 'result'])
         t.same(props, {
           applicant: APPLICANT_NAME,
-          link: DOC_KEY,
-          status: status.document.complete,
+          document: DOC_KEY,
+          status: status.check.complete,
           result
         })
 
         resolve()
       })
+    })
+
+    const checkCreated = new Promise(resolve => {
+      db.once('check:created', resolve)
     })
 
     yield onfido.createApplicant({ applicant: APPLICANT_NAME, personalInfo: PERSONAL_INFO_KEY })
@@ -324,19 +329,31 @@ test('create applicant', co(function* (t) {
       link: DOC_KEY
     })
 
-    yield Promise.all([docQueued, docCreated])
-    t.ok(yield onfido.db.getPendingDocument(APPLICANT_NAME))
-
-    const uploadedFace = new Promise(resolve => {
-      onfido.db.once('face:upload', resolve)
-    })
-
     yield onfido.checkFace({
       applicant: APPLICANT_NAME,
-      face: FACE_KEY
+      link: FACE_KEY
     })
 
-    yield uploadedFace
+    yield docUploaded
+    yield faceUploaded
+
+    yield onfido.checkAgainstLatestData({
+      applicant: APPLICANT_NAME,
+      checkFace: true
+    })
+
+    yield checkCreated
+
+    // const uploadedFace = new Promise(resolve => {
+    //   onfido.db.once('face:upload', resolve)
+    // })
+
+    // yield onfido.checkFace({
+    //   applicant: APPLICANT_NAME,
+    //   face: FACE_KEY
+    // })
+
+    // yield uploadedFace
 
     const webhookReq = new PassThrough()
     webhookReq.write(JSON.stringify({
@@ -366,13 +383,16 @@ test('create applicant', co(function* (t) {
     }
 
     yield onfido.processEvent(webhookReq, webhookRes)
-    yield docVerified
-    t.notOk(yield onfido.db.getPendingDocument(APPLICANT_NAME))
+    yield checkComplete
+    try {
+      yield onfido.db.getPendingCheck(APPLICANT_NAME)
+      t.fail('should have 0 pending checks')
+    } catch (err) {}
 
-    const verified = yield collect(onfido.db.streamVerifiedDocuments())
+    const verified = yield collect(onfido.db.streamVerifiedChecks())
     t.equal(verified.length, result === 'clear' ? 1 : 0)
 
-    const failed = yield collect(onfido.db.streamFailedDocuments())
+    const failed = yield collect(onfido.db.streamFailedChecks())
     t.equal(failed.length, result === 'clear' ? 0 : 1)
 
     yield cleanup(onfido)
